@@ -20,6 +20,7 @@ public class SettingsDialog extends JDialog {
 
     private JTextField storageLocationField;
     private JComboBox<String> dateFormatComboBox;
+    private JComboBox<String> sortOrderComboBox;
 
     // Common date format options
     private static final String[] DATE_FORMATS = {
@@ -31,6 +32,8 @@ public class SettingsDialog extends JDialog {
         "dd/MM/yyyy"
     };
 
+    private static final String[] SORT_ORDERS = { "Ascending", "Descending" };
+
     public SettingsDialog(Frame parent, Settings settings, boolean requireStorageLocation, boolean showStorageField) {
         super(parent, "NotePile Settings", true);
         this.settings = settings;
@@ -39,7 +42,13 @@ public class SettingsDialog extends JDialog {
         initComponents(requireStorageLocation);
         loadSettings();
 
-        setSize(600, 270);
+        // Let layout compute preferred sizes and then ensure a sensible minimum so combo text isn't clipped
+        pack();
+        Dimension pref = getPreferredSize();
+        int w = Math.max(pref.width, 600);
+        int h = Math.max(pref.height, 320);
+        setSize(w, h);
+        setMinimumSize(new Dimension(520, 240));
         setLocationRelativeTo(parent);
     }
 
@@ -52,6 +61,7 @@ public class SettingsDialog extends JDialog {
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(5, 5, 5, 5);
         gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.anchor = GridBagConstraints.WEST;
 
         int row = 0;
 
@@ -60,15 +70,23 @@ public class SettingsDialog extends JDialog {
             gbc.gridx = 0;
             gbc.gridy = row;
             gbc.weightx = 0;
+            // Slightly larger right padding for labels so they don't touch controls
+            gbc.insets = new Insets(5, 5, 5, 12);
+            // Right-align label text so it doesn't get overlapped by the control
+            gbc.anchor = GridBagConstraints.EAST;
             JLabel storageLabel = new JLabel("Storage Location:");
+            storageLabel.setHorizontalAlignment(SwingConstants.RIGHT);
             if (requireStorageLocation) {
                 storageLabel.setText("Storage Location: *");
                 storageLabel.setForeground(Color.RED.darker());
             }
             settingsPanel.add(storageLabel, gbc);
 
+            // Restore anchor/insets for the control cell
+            gbc.anchor = GridBagConstraints.WEST;
             gbc.gridx = 1;
             gbc.weightx = 1.0;
+            gbc.insets = new Insets(5, 5, 5, 5);
             storageLocationField = new JTextField();
             storageLocationField.setEditable(false);
             settingsPanel.add(storageLocationField, gbc);
@@ -82,18 +100,57 @@ public class SettingsDialog extends JDialog {
             row++;
         }
 
-        // Date Format
+        // Date Format (label in column 0, control in column 1)
         gbc.gridx = 0;
         gbc.gridy = row;
         gbc.weightx = 0;
-        settingsPanel.add(new JLabel("Date Format:"), gbc);
+        gbc.insets = new Insets(5, 5, 5, 12);
+        gbc.anchor = GridBagConstraints.EAST;
+        JLabel dateLabel = new JLabel("Date Format:");
+        dateLabel.setHorizontalAlignment(SwingConstants.RIGHT);
+        settingsPanel.add(dateLabel, gbc);
+
+        // Control in column 1
+        gbc.gridx = 1;
+        gbc.weightx = 1.0;
+        gbc.gridwidth = 1; // only this column
+        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.anchor = GridBagConstraints.WEST;
+        dateFormatComboBox = new JComboBox<>(DATE_FORMATS);
+        dateFormatComboBox.setEditable(false);
+        dateFormatComboBox.setPrototypeDisplayValue("yyyy-MM-dd");
+        settingsPanel.add(dateFormatComboBox, gbc);
+
+        // If storage field is shown, keep an empty filler in column 2 so layout matches other rows
+        if (showStorageField) {
+            gbc.gridx = 2;
+            gbc.weightx = 0;
+            settingsPanel.add(Box.createHorizontalStrut(8), gbc);
+        }
+
+        row++;
+        // Default Sort Order (label in column 0, control in column 1)
+        gbc.gridx = 0;
+        gbc.gridy = row;
+        gbc.weightx = 0;
+        gbc.insets = new Insets(5, 5, 5, 12);
+        gbc.anchor = GridBagConstraints.EAST;
+        JLabel sortLabel = new JLabel("Default Sort Order:");
+        sortLabel.setHorizontalAlignment(SwingConstants.RIGHT);
+        settingsPanel.add(sortLabel, gbc);
 
         gbc.gridx = 1;
         gbc.weightx = 1.0;
-        gbc.gridwidth = showStorageField ? 2 : 3;
-        dateFormatComboBox = new JComboBox<>(DATE_FORMATS);
-        dateFormatComboBox.setEditable(true);
-        settingsPanel.add(dateFormatComboBox, gbc);
+        gbc.gridwidth = 1;
+        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.anchor = GridBagConstraints.WEST;
+        sortOrderComboBox = new JComboBox<>(SORT_ORDERS);
+        sortOrderComboBox.setPrototypeDisplayValue("Descending");
+        DefaultListCellRenderer renderer = new DefaultListCellRenderer();
+        renderer.setHorizontalAlignment(SwingConstants.LEFT);
+        sortOrderComboBox.setRenderer(renderer);
+        dateFormatComboBox.setRenderer(renderer);
+        settingsPanel.add(sortOrderComboBox, gbc);
 
         mainPanel.add(settingsPanel, BorderLayout.CENTER);
 
@@ -143,6 +200,13 @@ public class SettingsDialog extends JDialog {
 
         if (settings.getDateFormat() != null) {
             dateFormatComboBox.setSelectedItem(settings.getDateFormat());
+        }
+
+        // Map enum to combo selection
+        if (settings.getDefaultSortOrder() != null) {
+            sortOrderComboBox.setSelectedItem(settings.getDefaultSortOrder().name());
+        } else {
+            sortOrderComboBox.setSelectedItem(Settings.SortOrder.Descending.name());
         }
     }
 
@@ -206,6 +270,12 @@ public class SettingsDialog extends JDialog {
         }
 
         settings.setDateFormat((String) dateFormatComboBox.getSelectedItem());
+        String so = (String) sortOrderComboBox.getSelectedItem();
+        try {
+            settings.setDefaultSortOrder(Settings.SortOrder.valueOf(so));
+        } catch (Exception ex) {
+            settings.setDefaultSortOrder(Settings.SortOrder.Descending);
+        }
 
         confirmed = true;
         dispose();

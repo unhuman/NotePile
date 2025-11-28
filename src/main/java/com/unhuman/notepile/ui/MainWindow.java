@@ -3,6 +3,7 @@ package com.unhuman.notepile.ui;
 import com.unhuman.notepile.model.Settings;
 
 import javax.swing.*;
+import javax.swing.event.ListSelectionEvent;
 import java.awt.*;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
@@ -11,6 +12,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Comparator;
+import java.util.stream.Collectors;
 
 /**
  * Main application window for NotePile
@@ -18,6 +21,11 @@ import java.nio.file.Paths;
 public class MainWindow extends JFrame {
     private Settings settings;
     private JLabel statusLabel;
+
+    // Notebook/chapter UI
+    private JComboBox<String> notebooksCombo;
+    private DefaultListModel<String> chaptersModel;
+    private JList<String> chaptersList;
 
     public MainWindow() {
         super("NotePile - Hierarchical Note Taking");
@@ -37,56 +45,98 @@ public class MainWindow extends JFrame {
     }
 
     private void initComponents() {
-        // Menu bar
-        JMenuBar menuBar = new JMenuBar();
+        // Left pane: notebooks and chapters
+        JPanel leftPanel = new JPanel(new BorderLayout(6, 6));
+        leftPanel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 
-        // File menu
-        JMenu fileMenu = new JMenu("File");
+        // Top: notebook selector + new button
+        JPanel topPanel = new JPanel(new BorderLayout(4, 4));
+        notebooksCombo = new JComboBox<>();
+        notebooksCombo.addActionListener(e -> {
+            String selected = (String) notebooksCombo.getSelectedItem();
+            refreshChapters(selected);
+        });
+        topPanel.add(notebooksCombo, BorderLayout.CENTER);
 
-        JMenuItem settingsMenuItem = new JMenuItem("Settings...");
-        // Show settings dialog WITHOUT storage field (only per-storage settings)
-        settingsMenuItem.addActionListener(e -> showSettings(this.settings, false, false));
-        fileMenu.add(settingsMenuItem);
+        JButton newNotebookBtn = new JButton("+");
+        newNotebookBtn.setToolTipText("New Notebook");
+        newNotebookBtn.addActionListener(e -> onNewNotebook());
+        topPanel.add(newNotebookBtn, BorderLayout.EAST);
 
-        fileMenu.addSeparator();
+        leftPanel.add(topPanel, BorderLayout.NORTH);
 
-        JMenuItem exitMenuItem = new JMenuItem("Exit");
-        exitMenuItem.addActionListener(e -> onExit());
-        fileMenu.add(exitMenuItem);
+        // Center: chapters list + new chapter button
+        chaptersModel = new DefaultListModel<>();
+        chaptersList = new JList<>(chaptersModel);
+        chaptersList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        chaptersList.addListSelectionListener((ListSelectionEvent e) -> {
+            if (!e.getValueIsAdjusting()) {
+                String chapter = chaptersList.getSelectedValue();
+                if (chapter != null) {
+                    updateStatus("Selected chapter: " + chapter);
+                }
+            }
+        });
 
-        menuBar.add(fileMenu);
+        JScrollPane chaptersScroll = new JScrollPane(chaptersList);
+        leftPanel.add(chaptersScroll, BorderLayout.CENTER);
 
-        // Help menu
-        JMenu helpMenu = new JMenu("Help");
-        JMenuItem aboutMenuItem = new JMenuItem("About");
-        aboutMenuItem.addActionListener(e -> showAbout());
-        helpMenu.add(aboutMenuItem);
+        JButton newChapterBtn = new JButton("New Chapter");
+        newChapterBtn.addActionListener(e -> onNewChapter());
+        leftPanel.add(newChapterBtn, BorderLayout.SOUTH);
 
-        menuBar.add(helpMenu);
-
-        setJMenuBar(menuBar);
-
-        // Main content panel
-        JPanel contentPanel = new JPanel(new BorderLayout());
-
-        // Placeholder for note-taking UI
-        JPanel centerPanel = new JPanel(new BorderLayout());
-        centerPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        // Right pane: note-taking UI with Add Note button
+        JPanel rightPanel = new JPanel(new BorderLayout());
+        rightPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        JPanel topRight = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        JButton addNoteBtn = new JButton("Add Note");
+        addNoteBtn.addActionListener(e -> onAddNote());
+        topRight.add(addNoteBtn);
+        rightPanel.add(topRight, BorderLayout.NORTH);
 
         JLabel placeholderLabel = new JLabel("Note-taking interface will be implemented here", SwingConstants.CENTER);
         placeholderLabel.setFont(placeholderLabel.getFont().deriveFont(18f));
         placeholderLabel.setForeground(Color.GRAY);
-        centerPanel.add(placeholderLabel, BorderLayout.CENTER);
+        rightPanel.add(placeholderLabel, BorderLayout.CENTER);
 
-        contentPanel.add(centerPanel, BorderLayout.CENTER);
+        // Split pane
+        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftPanel, rightPanel);
+        split.setDividerLocation(300);
 
         // Status bar
         statusLabel = new JLabel(" ");
         statusLabel.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createMatteBorder(1, 0, 0, 0, Color.GRAY),
-            BorderFactory.createEmptyBorder(2, 5, 2, 5)
+                BorderFactory.createMatteBorder(1, 0, 0, 0, Color.GRAY),
+                BorderFactory.createEmptyBorder(2, 5, 2, 5)
         ));
+
+        // Main frame layout
+        JPanel contentPanel = new JPanel(new BorderLayout());
+        contentPanel.add(split, BorderLayout.CENTER);
         contentPanel.add(statusLabel, BorderLayout.SOUTH);
+
+        // --- Menu Bar (File / Help) ---
+        JMenuBar menuBar = new JMenuBar();
+        JMenu fileMenu = new JMenu("File");
+        JMenuItem settingsItem = new JMenuItem("Settings...");
+        settingsItem.addActionListener(e -> {
+            // Open settings dialog (do not require storage or show storage field)
+            showSettings(this.settings == null ? new com.unhuman.notepile.model.Settings() : this.settings, false, false);
+        });
+        fileMenu.add(settingsItem);
+
+        JMenuItem exitItem = new JMenuItem("Exit");
+        exitItem.addActionListener(e -> onExit());
+        fileMenu.add(exitItem);
+        menuBar.add(fileMenu);
+
+        JMenu helpMenu = new JMenu("Help");
+        JMenuItem aboutItem = new JMenuItem("About");
+        aboutItem.addActionListener(e -> showAbout());
+        helpMenu.add(aboutItem);
+        menuBar.add(helpMenu);
+
+        setJMenuBar(menuBar);
 
         setContentPane(contentPanel);
     }
@@ -97,6 +147,7 @@ public class MainWindow extends JFrame {
 
         if (settings != null && settings.isValid()) {
             updateStatus("Storage location: " + settings.getStorageLocation());
+            refreshNotebooks();
             return;
         }
 
@@ -110,9 +161,9 @@ public class MainWindow extends JFrame {
         int result = chooser.showOpenDialog(this);
         if (result != JFileChooser.APPROVE_OPTION) {
             JOptionPane.showMessageDialog(this,
-                "Storage location is required to use NotePile.\nApplication will now exit.",
-                "Configuration Required",
-                JOptionPane.WARNING_MESSAGE);
+                    "Storage location is required to use NotePile.\nApplication will now exit.",
+                    "Configuration Required",
+                    JOptionPane.WARNING_MESSAGE);
             System.exit(0);
             return;
         }
@@ -141,19 +192,16 @@ public class MainWindow extends JFrame {
             }
             this.settings = loaded;
             updateStatus("Storage location: " + settings.getStorageLocation());
+            refreshNotebooks();
         } catch (IOException e) {
             JOptionPane.showMessageDialog(this,
-                "Failed to save/load settings: " + e.getMessage(),
-                "Error",
-                JOptionPane.ERROR_MESSAGE);
+                    "Failed to save/load settings: " + e.getMessage(),
+                    "Error",
+                    JOptionPane.ERROR_MESSAGE);
             System.exit(1);
         }
     }
 
-    /**
-     * Show settings dialog. If 'dialogSettings' represents a required storage location selection, the returned
-     * settings will be persisted via Settings.setStorageLocationAndLoadIfExists.
-     */
     private boolean showSettings(Settings dialogSettings, boolean requireStorageLocation, boolean showStorageField) {
         boolean confirmed = SettingsDialog.showDialog(this, dialogSettings, requireStorageLocation, showStorageField);
 
@@ -173,12 +221,13 @@ public class MainWindow extends JFrame {
                 loaded.save();
                 this.settings = loaded;
                 updateStatus("Settings saved - Storage: " + settings.getStorageLocation());
+                refreshNotebooks();
                 return true;
             } catch (IOException e) {
                 JOptionPane.showMessageDialog(this,
-                    "Failed to save settings: " + e.getMessage(),
-                    "Error",
-                    JOptionPane.ERROR_MESSAGE);
+                        "Failed to save settings: " + e.getMessage(),
+                        "Error",
+                        JOptionPane.ERROR_MESSAGE);
                 return false;
             }
         }
@@ -194,14 +243,141 @@ public class MainWindow extends JFrame {
                 return true;
             } catch (IOException e) {
                 JOptionPane.showMessageDialog(this,
-                    "Failed to save settings: " + e.getMessage(),
-                    "Error",
-                    JOptionPane.ERROR_MESSAGE);
+                        "Failed to save settings: " + e.getMessage(),
+                        "Error",
+                        JOptionPane.ERROR_MESSAGE);
                 return false;
             }
         }
 
         return confirmed;
+    }
+
+    private void refreshNotebooks() {
+        notebooksCombo.removeAllItems();
+        chaptersModel.clear();
+        if (settings == null || settings.getStorageLocation() == null) return;
+
+        Path storage = Paths.get(settings.getStorageLocation());
+        if (!Files.exists(storage) || !Files.isDirectory(storage)) return;
+
+        try {
+            Files.list(storage)
+                    .filter(Files::isDirectory)
+                    .sorted(Comparator.comparing(Path::getFileName))
+                    .map(p -> p.getFileName().toString())
+                    .collect(Collectors.toList())
+                    .forEach(name -> notebooksCombo.addItem(name));
+            // Auto-select first notebook if present
+            if (notebooksCombo.getItemCount() > 0) {
+                notebooksCombo.setSelectedIndex(0);
+            }
+        } catch (IOException e) {
+            updateStatus("Failed to list notebooks: " + e.getMessage());
+        }
+    }
+
+    private void refreshChapters(String notebook) {
+        chaptersModel.clear();
+        if (notebook == null || settings == null || settings.getStorageLocation() == null) return;
+
+        Path nbPath = Paths.get(settings.getStorageLocation(), notebook);
+        if (!Files.exists(nbPath) || !Files.isDirectory(nbPath)) return;
+
+        try {
+            // Chapters are now directories under the notebook folder
+            Files.list(nbPath)
+                    .filter(Files::isDirectory)
+                    .sorted(Comparator.comparing(Path::getFileName))
+                    .map(p -> p.getFileName().toString())
+                    .collect(Collectors.toList())
+                    .forEach(chaptersModel::addElement);
+        } catch (IOException e) {
+            updateStatus("Failed to list chapters: " + e.getMessage());
+        }
+    }
+
+    private void onNewNotebook() {
+        if (settings == null || settings.getStorageLocation() == null) {
+            JOptionPane.showMessageDialog(this, "Storage location is not configured.", "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        String name = JOptionPane.showInputDialog(this, "Enter new notebook name:");
+        if (name == null || name.trim().isEmpty()) return;
+        String trimmed = name.trim();
+        // basic validation: no path separators, no traversal
+        if (trimmed.contains("/") || trimmed.contains("\\") || trimmed.contains("..")) {
+            JOptionPane.showMessageDialog(this, "Invalid notebook name. Please avoid path separators or '..'.", "Invalid Name", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        Path nbPath = Paths.get(settings.getStorageLocation(), trimmed);
+        try {
+            if (Files.exists(nbPath)) {
+                JOptionPane.showMessageDialog(this, "A notebook with that name already exists.", "Duplicate Notebook", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+            Files.createDirectories(nbPath);
+            refreshNotebooks();
+            notebooksCombo.setSelectedItem(trimmed);
+        } catch (IOException e) {
+            JOptionPane.showMessageDialog(this, "Failed to create notebook: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private void onNewChapter() {
+        String notebook = (String) notebooksCombo.getSelectedItem();
+        if (notebook == null) {
+            JOptionPane.showMessageDialog(this, "Please select a notebook first.", "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        String name = JOptionPane.showInputDialog(this, "Enter new chapter name (e.g. Chapter1):");
+        if (name == null || name.trim().isEmpty()) return;
+        String trimmed = name.trim();
+        // validate: must start with alphanumeric, no separators or traversal
+        if (!trimmed.matches("^[A-Za-z0-9].*")) {
+            JOptionPane.showMessageDialog(this, "Chapter filename must start with an alphanumeric character.", "Invalid Chapter Name", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        if (trimmed.contains("/") || trimmed.contains("\\") || trimmed.contains("..")) {
+            JOptionPane.showMessageDialog(this, "Invalid chapter filename. Please avoid path separators or '..'.", "Invalid Name", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        Path chapterPath = Paths.get(settings.getStorageLocation(), notebook, trimmed);
+        try {
+            if (Files.exists(chapterPath)) {
+                JOptionPane.showMessageDialog(this, "A chapter with that name already exists in this notebook.", "Duplicate Chapter", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+            // Create chapter as a directory
+            Files.createDirectories(chapterPath);
+            refreshChapters(notebook);
+            chaptersList.setSelectedValue(trimmed, true);
+        } catch (IOException e) {
+            JOptionPane.showMessageDialog(this, "Failed to create chapter: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private void onAddNote() {
+        // Build list of notebooks and chapters for the dialog
+        java.util.List<String> notebooks = new java.util.ArrayList<>();
+        for (int i = 0; i < notebooksCombo.getItemCount(); i++) notebooks.add((String) notebooksCombo.getItemAt(i));
+        String selNb = (String) notebooksCombo.getSelectedItem();
+        String selCh = chaptersList.getSelectedValue();
+
+        NoteDialog dlg = new NoteDialog(this, settings.getStorageLocation(), notebooks, selNb, selCh, settings.getDateFormat());
+        dlg.setVisible(true);
+        if (!dlg.isConfirmed()) return;
+
+        java.nio.file.Path saved = dlg.getLastSavedPath();
+        if (saved != null) {
+            updateStatus("Note saved: " + saved.toString());
+            // Refresh chapters for the current notebook so the chapter listing remains visible
+            refreshChapters(selNb);
+        } else {
+            updateStatus("Note saved.");
+            // Best-effort refresh
+            refreshNotebooks();
+        }
     }
 
     private void updateStatus(String message) {
@@ -210,18 +386,18 @@ public class MainWindow extends JFrame {
 
     private void showAbout() {
         JOptionPane.showMessageDialog(this,
-            "NotePile v1.0.0\n" +
-            "Hierarchical Note Taking Application\n\n" +
-            "© 2025 Unhuman",
-            "About NotePile",
-            JOptionPane.INFORMATION_MESSAGE);
+                "NotePile v1.0.0\n" +
+                        "Hierarchical Note Taking Application\n\n" +
+                        "© 2025 Unhuman",
+                "About NotePile",
+                JOptionPane.INFORMATION_MESSAGE);
     }
 
     private void onExit() {
         int choice = JOptionPane.showConfirmDialog(this,
-            "Are you sure you want to exit?",
-            "Exit NotePile",
-            JOptionPane.YES_NO_OPTION);
+                "Are you sure you want to exit?",
+                "Exit NotePile",
+                JOptionPane.YES_NO_OPTION);
 
         if (choice == JOptionPane.YES_OPTION) {
             dispose();
