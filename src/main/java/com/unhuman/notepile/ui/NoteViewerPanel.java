@@ -79,6 +79,9 @@ public class NoteViewerPanel extends JPanel {
         scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
          add(scrollPane, BorderLayout.CENTER);
         MutableDataSet options = new MutableDataSet();
+        // Enable hard line breaks: treat all newlines as <br> tags (note-taking behavior)
+        // Setting SOFT_BREAK to <br> makes the renderer output <br> for soft line breaks
+        options.set(HtmlRenderer.SOFT_BREAK, "<br />\n");
         mdParser = Parser.builder(options).build();
         mdRenderer = HtmlRenderer.builder(options).build();
         // listen for viewport resize to remeasure rendered notes (debounced)
@@ -227,7 +230,20 @@ public class NoteViewerPanel extends JPanel {
         // Build HTML from markdown using Flexmark
         String html;
         try {
-            com.vladsch.flexmark.util.ast.Node doc = mdParser.parse(markdown == null ? "" : markdown);
+            String processedMarkdown = markdown == null ? "" : markdown;
+            // Pre-process: Replace single newlines with hard breaks (two trailing spaces + newline)
+            // but preserve blank lines (double newlines) for paragraph breaks.
+            // First normalize line endings: convert Windows CRLF (\r\n) to Unix LF (\n)
+            processedMarkdown = processedMarkdown.replace("\r\n", "\n");
+            processedMarkdown = processedMarkdown.replace("\r", "\n"); // handle old Mac CR
+
+            // Strategy: Temporarily replace \n\n with a placeholder, add spaces to remaining \n, then restore
+            String PARA_MARKER = "\u0000PARA\u0000";
+            processedMarkdown = processedMarkdown.replace("\n\n", PARA_MARKER);
+            processedMarkdown = processedMarkdown.replace("\n", "  \n");
+            processedMarkdown = processedMarkdown.replace(PARA_MARKER, "\n\n");
+
+            com.vladsch.flexmark.util.ast.Node doc = mdParser.parse(processedMarkdown);
             html = mdRenderer.render(doc);
         } catch (Exception ex) {
             html = "<pre>Failed to render markdown</pre>";
@@ -240,9 +256,9 @@ public class NoteViewerPanel extends JPanel {
         String css = "html,body{height:auto !important;min-height:0 !important;margin:0;padding:0;overflow-x:hidden;}" +
                 "#notepile-root{box-sizing:border-box;padding:8px 12px 8px 12px;display:block;width:100%;}" +
                 "body{font-family:sans-serif;font-size:12px;color:#111;}" +
-                "img{max-width:100%;height:auto;display:block;margin:0;} p{margin:4px 0;}" +
+                "img{max-width:100%;height:auto;display:block;margin:0;} p{margin:12px 0;}" +
                 "pre, code { white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word; }" +
-                "table{ max-width:100%; table-layout: fixed; }";
+                "table{ max-width:100%; table-layout: fixed; } ul,ol{margin:4px 0;padding-left:24px;}";
         String enhancedHtml = "<html><head><base href='" + baseHref + "'/><style>" + css + "</style></head><body><div id='notepile-root'>" + html + "</div></body></html>";
 
         // Ensure temp HTML is written to disk so WebView has a file URL (reliable base for relative attachments)
