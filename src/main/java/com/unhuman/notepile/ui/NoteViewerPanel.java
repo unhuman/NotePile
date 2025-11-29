@@ -288,6 +288,11 @@ public class NoteViewerPanel extends JPanel {
                 @Override
                 public void mouseReleased(java.awt.event.MouseEvent e) { if (e.isPopupTrigger()) p.dispatchEvent(e); }
             });
+
+            // Forward mouse wheel events to the parent scroll pane so scrolling anywhere scrolls the entire window
+            jfxPanel.addMouseWheelListener(e -> {
+                scrollPane.dispatchEvent(SwingUtilities.convertMouseEvent(e.getComponent(), e, scrollPane));
+            });
         }
 
         // Support drag-and-drop onto the panel for attachments
@@ -381,6 +386,11 @@ public class NoteViewerPanel extends JPanel {
              }
          });
 
+         // Forward mouse wheel events to the parent scroll pane so scrolling anywhere scrolls the entire window
+         p.addMouseWheelListener(e -> {
+             scrollPane.dispatchEvent(SwingUtilities.convertMouseEvent(e.getComponent(), e, scrollPane));
+         });
+
         return p;
     }
 
@@ -400,6 +410,8 @@ public class NoteViewerPanel extends JPanel {
         Platform.runLater(() -> {
             try {
                 WebView webView = new WebView();
+                // Disable the WebView's default context menu so our custom edit/delete menu works
+                webView.setContextMenuEnabled(false);
                 // lower minimum width to avoid forcing horizontal scrollbars when viewport is narrow
                 final double widthFinal = Math.max(200, scrollPane.getViewport().getWidth() - 32);
                 webView.setPrefWidth(widthFinal);
