@@ -436,6 +436,36 @@ public class NoteViewerPanel extends JPanel {
                 targetPanel.setScene(scene);
 
                 final WebEngine engine = webView.getEngine();
+
+                // Intercept link clicks to open in external browser instead of webview
+                engine.locationProperty().addListener((observable, oldLocation, newLocation) -> {
+                    if (newLocation != null && !newLocation.isEmpty()) {
+                        // Check if this is a link click (not the initial page load)
+                        if (!newLocation.startsWith("file:")) {
+                            // External link - open in browser
+                            openUrlInBrowser(newLocation);
+                            // Cancel navigation in webview
+                            Platform.runLater(() -> engine.load(oldLocation));
+                        } else if (newLocation.startsWith("file:") && oldLocation != null && !oldLocation.isEmpty()) {
+                            // Check if this is a link to an attachment file
+                            if (newLocation.contains("/attachments/")) {
+                                // Extract the file path and open it externally
+                                try {
+                                    java.net.URI uri = new java.net.URI(newLocation);
+                                    Path attachmentPath = Paths.get(uri);
+                                    if (Files.exists(attachmentPath)) {
+                                        openFileExternally(attachmentPath);
+                                    }
+                                } catch (Exception e) {
+                                    System.err.println("Failed to open attachment: " + e.getMessage());
+                                }
+                                // Cancel navigation in webview
+                                Platform.runLater(() -> engine.load(oldLocation));
+                            }
+                        }
+                    }
+                });
+
                 // register this render entry so we can remeasure on resize
                 engine.getLoadWorker().stateProperty().addListener((ignored, oldState, newState) -> {
                     if (newState == Worker.State.SUCCEEDED && oldState != Worker.State.SUCCEEDED) {
@@ -749,6 +779,53 @@ public class NoteViewerPanel extends JPanel {
         // Remove any bookkeeping for rendered entries. The Swing components will be removed
         // when the panels are cleared; we just clear the registry here.
         renderEntries.clear();
+    }
+
+    /**
+     * Open a URL in the system's default web browser.
+     */
+    private void openUrlInBrowser(String url) {
+        try {
+            if (java.awt.Desktop.isDesktopSupported()) {
+                java.awt.Desktop desktop = java.awt.Desktop.getDesktop();
+                if (desktop.isSupported(java.awt.Desktop.Action.BROWSE)) {
+                    desktop.browse(new java.net.URI(url));
+                } else {
+                    System.err.println("Browser action not supported on this system");
+                }
+            } else {
+                System.err.println("Desktop operations not supported on this system");
+            }
+        } catch (Exception ex) {
+            System.err.println("Failed to open URL in browser: " + ex.getMessage());
+            ex.printStackTrace(System.err);
+        }
+    }
+
+    /**
+     * Open a file with the system's default application.
+     */
+    private void openFileExternally(Path filePath) {
+        try {
+            if (!Files.exists(filePath)) {
+                System.err.println("File not found: " + filePath);
+                return;
+            }
+
+            if (java.awt.Desktop.isDesktopSupported()) {
+                java.awt.Desktop desktop = java.awt.Desktop.getDesktop();
+                if (desktop.isSupported(java.awt.Desktop.Action.OPEN)) {
+                    desktop.open(filePath.toFile());
+                } else {
+                    System.err.println("Open action not supported on this system");
+                }
+            } else {
+                System.err.println("Desktop operations not supported on this system");
+            }
+        } catch (Exception ex) {
+            System.err.println("Failed to open file: " + ex.getMessage());
+            ex.printStackTrace(System.err);
+        }
     }
 
     // RenderEntry and resize remeasure helpers

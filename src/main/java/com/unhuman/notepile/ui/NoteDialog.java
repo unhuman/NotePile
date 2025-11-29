@@ -645,6 +645,154 @@ public class NoteDialog extends JDialog {
         textPane.getInputMap().put(KeyStroke.getKeyStroke("control X"), "cut-to-clipboard");
         textPane.getInputMap().put(KeyStroke.getKeyStroke("control C"), "copy-to-clipboard");
         textPane.getInputMap().put(KeyStroke.getKeyStroke("control V"), "paste-from-clipboard");
+
+        // Setup right-click context menu
+        setupContextMenu(textPane);
+    }
+
+    /**
+     * Setup right-click context menu for the editor with Cut/Copy/Paste/Delete/Attach File options.
+     */
+    private void setupContextMenu(JTextPane textPane) {
+        JPopupMenu contextMenu = new JPopupMenu();
+
+        // Cut menu item
+        JMenuItem cutItem = new JMenuItem("Cut");
+        cutItem.setAccelerator(KeyStroke.getKeyStroke("control X"));
+        cutItem.addActionListener(e -> textPane.cut());
+        contextMenu.add(cutItem);
+
+        // Copy menu item
+        JMenuItem copyItem = new JMenuItem("Copy");
+        copyItem.setAccelerator(KeyStroke.getKeyStroke("control C"));
+        copyItem.addActionListener(e -> textPane.copy());
+        contextMenu.add(copyItem);
+
+        // Paste menu item
+        JMenuItem pasteItem = new JMenuItem("Paste");
+        pasteItem.setAccelerator(KeyStroke.getKeyStroke("control V"));
+        pasteItem.addActionListener(e -> textPane.paste());
+        contextMenu.add(pasteItem);
+
+        // Delete menu item
+        JMenuItem deleteItem = new JMenuItem("Delete");
+        deleteItem.setAccelerator(KeyStroke.getKeyStroke("DELETE"));
+        deleteItem.addActionListener(e -> textPane.replaceSelection(""));
+        contextMenu.add(deleteItem);
+
+        contextMenu.addSeparator();
+
+        // Attach File menu item
+        JMenuItem attachFileItem = new JMenuItem("Attach File...");
+        attachFileItem.addActionListener(e -> attachFile());
+        contextMenu.add(attachFileItem);
+
+        // Add popup listener to enable/disable menu items based on state
+        textPane.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                if (e.isPopupTrigger()) {
+                    showContextMenu(e, contextMenu, cutItem, copyItem, pasteItem, deleteItem);
+                }
+            }
+
+            @Override
+            public void mouseReleased(MouseEvent e) {
+                if (e.isPopupTrigger()) {
+                    showContextMenu(e, contextMenu, cutItem, copyItem, pasteItem, deleteItem);
+                }
+            }
+        });
+    }
+
+    /**
+     * Show context menu and enable/disable items based on current state.
+     */
+    private void showContextMenu(MouseEvent e, JPopupMenu menu, JMenuItem cutItem,
+                                   JMenuItem copyItem, JMenuItem pasteItem, JMenuItem deleteItem) {
+        // Enable/disable based on selection
+        boolean hasSelection = contentArea.getSelectionStart() != contentArea.getSelectionEnd();
+        cutItem.setEnabled(hasSelection);
+        copyItem.setEnabled(hasSelection);
+        deleteItem.setEnabled(hasSelection);
+
+        // Enable paste only if clipboard has content
+        boolean canPaste = false;
+        try {
+            java.awt.datatransfer.Clipboard clipboard = java.awt.Toolkit.getDefaultToolkit().getSystemClipboard();
+            java.awt.datatransfer.Transferable contents = clipboard.getContents(null);
+            canPaste = contents != null && (
+                contents.isDataFlavorSupported(java.awt.datatransfer.DataFlavor.stringFlavor) ||
+                contents.isDataFlavorSupported(java.awt.datatransfer.DataFlavor.imageFlavor) ||
+                contents.isDataFlavorSupported(java.awt.datatransfer.DataFlavor.javaFileListFlavor)
+            );
+        } catch (Exception ex) {
+            // If we can't check clipboard, assume we can paste
+            canPaste = true;
+        }
+        pasteItem.setEnabled(canPaste);
+
+        menu.show(e.getComponent(), e.getX(), e.getY());
+    }
+
+    /**
+     * Open a file chooser dialog to attach a file to the note.
+     */
+    private void attachFile() {
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setDialogTitle("Select File to Attach");
+        fileChooser.setMultiSelectionEnabled(true);
+
+        int result = fileChooser.showOpenDialog(this);
+        if (result == JFileChooser.APPROVE_OPTION) {
+            java.io.File[] selectedFiles = fileChooser.getSelectedFiles();
+            if (selectedFiles.length == 0) {
+                selectedFiles = new java.io.File[] { fileChooser.getSelectedFile() };
+            }
+
+            // Get current notebook and chapter
+            String nb = (String) notebooksCombo.getSelectedItem();
+            String ch = (String) chaptersCombo.getSelectedItem();
+
+            if (nb == null || ch == null) {
+                JOptionPane.showMessageDialog(this,
+                    "Please select a notebook and chapter before attaching files.",
+                    "No Target", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+
+            try {
+                Path attachmentsDir = Paths.get(storageRoot, nb, ch, "notes", "attachments");
+                if (!Files.exists(attachmentsDir)) {
+                    Files.createDirectories(attachmentsDir);
+                }
+
+                for (java.io.File file : selectedFiles) {
+                    Path dest = copyAttachment(file.toPath(), attachmentsDir);
+                    if (dest != null) {
+                        String fileName = dest.getFileName().toString();
+
+                        // Track this file for cleanup if not used
+                        attachedImages.add(fileName);
+
+                        String lower = fileName.toLowerCase();
+                        // If image, insert inline with markdown, otherwise just markdown link
+                        if (lower.endsWith(".png") || lower.endsWith(".jpg") ||
+                            lower.endsWith(".jpeg") || lower.endsWith(".gif")) {
+                            insertImageInline(dest, fileName);
+                        } else {
+                            // Insert as a clickable link
+                            String markdown = "[" + fileName + "](attachments/" + fileName + ")\n";
+                            contentArea.replaceSelection(markdown);
+                        }
+                    }
+                }
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(this,
+                    "Failed to attach file: " + ex.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
+            }
+        }
     }
 
     /**
@@ -734,6 +882,7 @@ public class NoteDialog extends JDialog {
     /**
      * Parse content and insert text/image components into the editor.
      * Converts <img> tags back to ResizableImageComponent for editing.
+     * Converts markdown links to clickable links for non-image files.
      */
     private void parseAndInsertContent(String content, String notebook, String chapter) {
         if (content == null || content.isEmpty()) {
@@ -750,54 +899,210 @@ public class NoteDialog extends JDialog {
             java.util.regex.Pattern.CASE_INSENSITIVE
         );
 
-        java.util.regex.Matcher matcher = imgPattern.matcher(content);
-        int lastEnd = 0;
+        // Pattern to match markdown links: [filename](attachments/filename)
+        java.util.regex.Pattern linkPattern = java.util.regex.Pattern.compile(
+            "\\[([^\\]]+)\\]\\(attachments/([^)]+)\\)"
+        );
 
-        while (matcher.find()) {
-            // Insert text before this image
-            if (matcher.start() > lastEnd) {
-                String textBefore = content.substring(lastEnd, matcher.start());
-                contentArea.replaceSelection(textBefore);
-            }
+        // First pass: process images
+        java.util.regex.Matcher imgMatcher = imgPattern.matcher(content);
+        StringBuilder tempContent = new StringBuilder(content);
+        java.util.List<ImageReplacement> imageReplacements = new java.util.ArrayList<>();
 
-            // Extract image info
-            String fileName = matcher.group(1);
-            int width = Integer.parseInt(matcher.group(2));
-
-            // Try to load and insert the image component
-            try {
-                Path attachmentsDir = Paths.get(storageRoot, notebook, chapter, "notes", "attachments");
-                Path imagePath = attachmentsDir.resolve(fileName);
-
-                if (Files.exists(imagePath)) {
-                    java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(imagePath.toFile());
-                    if (img != null) {
-                        // Track this image for cleanup if removed during editing
-                        attachedImages.add(fileName);
-
-                        // Create component with the saved width
-                        ResizableImageComponent imageComp = new ResizableImageComponent(img, fileName, imagePath, width);
-                        contentArea.insertComponent(imageComp);
-                    } else {
-                        // Fallback: insert the HTML as-is
-                        contentArea.replaceSelection(matcher.group(0));
-                    }
-                } else {
-                    // File doesn't exist, insert placeholder text
-                    contentArea.replaceSelection("![" + fileName + " - FILE NOT FOUND]");
-                }
-            } catch (Exception ex) {
-                // On error, insert the HTML as-is
-                contentArea.replaceSelection(matcher.group(0));
-            }
-
-            lastEnd = matcher.end();
+        while (imgMatcher.find()) {
+            String fileName = imgMatcher.group(1);
+            int width = Integer.parseInt(imgMatcher.group(2));
+            imageReplacements.add(new ImageReplacement(imgMatcher.start(), imgMatcher.end(), fileName, width));
         }
 
-        // Insert any remaining text after the last image
-        if (lastEnd < content.length()) {
-            String textAfter = content.substring(lastEnd);
-            contentArea.replaceSelection(textAfter);
+        // Process from end to start to maintain indices
+        for (int i = imageReplacements.size() - 1; i >= 0; i--) {
+            ImageReplacement ir = imageReplacements.get(i);
+            tempContent.replace(ir.start, ir.end, "\u0000IMG" + i + "\u0000");
+        }
+
+        // Second pass: process markdown links for non-images
+        String processedContent = tempContent.toString();
+        java.util.regex.Matcher linkMatcher = linkPattern.matcher(processedContent);
+        java.util.List<LinkReplacement> linkReplacements = new java.util.ArrayList<>();
+
+        while (linkMatcher.find()) {
+            String displayText = linkMatcher.group(1);
+            String fileName = linkMatcher.group(2);
+            linkReplacements.add(new LinkReplacement(linkMatcher.start(), linkMatcher.end(), displayText, fileName));
+        }
+
+        // Process links from end to start
+        for (int i = linkReplacements.size() - 1; i >= 0; i--) {
+            LinkReplacement lr = linkReplacements.get(i);
+            processedContent = processedContent.substring(0, lr.start) + "\u0000LINK" + i + "\u0000" + processedContent.substring(lr.end);
+        }
+
+        // Now insert everything in order
+        int pos = 0;
+        while (pos < processedContent.length()) {
+            char ch = processedContent.charAt(pos);
+
+            if (ch == '\u0000') {
+                // Found a placeholder
+                int endPos = processedContent.indexOf('\u0000', pos + 1);
+                if (endPos > pos) {
+                    String placeholder = processedContent.substring(pos + 1, endPos);
+
+                    if (placeholder.startsWith("IMG")) {
+                        int imgIndex = Integer.parseInt(placeholder.substring(3));
+                        insertImageComponent(imageReplacements.get(imgIndex), notebook, chapter);
+                    } else if (placeholder.startsWith("LINK")) {
+                        int linkIndex = Integer.parseInt(placeholder.substring(4));
+                        insertClickableLink(linkReplacements.get(linkIndex), notebook, chapter);
+                    }
+
+                    pos = endPos + 1;
+                    continue;
+                }
+            }
+
+            // Regular character - find next placeholder or end
+            int nextPlaceholder = processedContent.indexOf('\u0000', pos);
+            if (nextPlaceholder == -1) nextPlaceholder = processedContent.length();
+
+            String text = processedContent.substring(pos, nextPlaceholder);
+            if (!text.isEmpty()) {
+                contentArea.replaceSelection(text);
+            }
+            pos = nextPlaceholder;
+        }
+    }
+
+    // Helper classes for tracking replacements
+    private static class ImageReplacement {
+        int start, end, width;
+        String fileName;
+        ImageReplacement(int start, int end, String fileName, int width) {
+            this.start = start; this.end = end; this.fileName = fileName; this.width = width;
+        }
+    }
+
+    private static class LinkReplacement {
+        int start, end;
+        String displayText, fileName;
+        LinkReplacement(int start, int end, String displayText, String fileName) {
+            this.start = start; this.end = end; this.displayText = displayText; this.fileName = fileName;
+        }
+    }
+
+    /**
+     * Insert an image component at the current position.
+     */
+    private void insertImageComponent(ImageReplacement ir, String notebook, String chapter) {
+        try {
+            Path attachmentsDir = Paths.get(storageRoot, notebook, chapter, "notes", "attachments");
+            Path imagePath = attachmentsDir.resolve(ir.fileName);
+
+            if (Files.exists(imagePath)) {
+                java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(imagePath.toFile());
+                if (img != null) {
+                    // Track this image for cleanup if removed during editing
+                    attachedImages.add(ir.fileName);
+
+                    // Create component with the saved width
+                    ResizableImageComponent imageComp = new ResizableImageComponent(img, ir.fileName, imagePath, ir.width);
+                    contentArea.insertComponent(imageComp);
+                } else {
+                    // Fallback: insert as text
+                    contentArea.replaceSelection("[Image: " + ir.fileName + "]");
+                }
+            } else {
+                // File doesn't exist, insert placeholder text
+                contentArea.replaceSelection("![" + ir.fileName + " - FILE NOT FOUND]");
+            }
+        } catch (Exception ex) {
+            contentArea.replaceSelection("[Image: " + ir.fileName + " - ERROR]");
+        }
+    }
+
+    /**
+     * Insert a clickable link component for non-image files.
+     */
+    private void insertClickableLink(LinkReplacement lr, String notebook, String chapter) {
+        try {
+            Path attachmentsDir = Paths.get(storageRoot, notebook, chapter, "notes", "attachments");
+            Path filePath = attachmentsDir.resolve(lr.fileName);
+
+            // Track this file for cleanup if removed during editing
+            attachedImages.add(lr.fileName);
+
+            // Create a clickable button/link
+            JButton linkButton = new JButton(lr.displayText);
+            linkButton.setBorderPainted(false);
+            linkButton.setContentAreaFilled(false);
+            linkButton.setForeground(Color.BLUE);
+            linkButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            linkButton.setFocusable(false);
+
+            // Store original font for hover effect
+            Font originalFont = linkButton.getFont();
+            Font underlinedFont = originalFont.deriveFont(originalFont.getAttributes());
+            java.util.Map<java.awt.font.TextAttribute, Object> attributes = new java.util.HashMap<>(underlinedFont.getAttributes());
+            attributes.put(java.awt.font.TextAttribute.UNDERLINE, java.awt.font.TextAttribute.UNDERLINE_ON);
+            Font underlineFont = originalFont.deriveFont(attributes);
+
+            // Store fileName for extraction when saving
+            linkButton.putClientProperty("fileName", lr.fileName);
+
+            // Add underline on hover using font attributes (no size change)
+            linkButton.addMouseListener(new MouseAdapter() {
+                @Override
+                public void mouseEntered(MouseEvent e) {
+                    linkButton.setFont(underlineFont);
+                }
+
+                @Override
+                public void mouseExited(MouseEvent e) {
+                    linkButton.setFont(originalFont);
+                }
+            });
+
+            // Open file when clicked
+            linkButton.addActionListener(e -> openFileExternally(filePath));
+
+            contentArea.insertComponent(linkButton);
+        } catch (Exception ex) {
+            contentArea.replaceSelection("[" + lr.displayText + "]");
+        }
+    }
+
+    /**
+     * Open a file with the system's default application.
+     */
+    private void openFileExternally(Path filePath) {
+        try {
+            if (!Files.exists(filePath)) {
+                JOptionPane.showMessageDialog(this,
+                    "File not found: " + filePath.getFileName(),
+                    "File Not Found", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            // Use Desktop API to open with default application
+            if (Desktop.isDesktopSupported()) {
+                Desktop desktop = Desktop.getDesktop();
+                if (desktop.isSupported(Desktop.Action.OPEN)) {
+                    desktop.open(filePath.toFile());
+                } else {
+                    JOptionPane.showMessageDialog(this,
+                        "Cannot open files on this system.",
+                        "Not Supported", JOptionPane.ERROR_MESSAGE);
+                }
+            } else {
+                JOptionPane.showMessageDialog(this,
+                    "Desktop operations not supported on this system.",
+                    "Not Supported", JOptionPane.ERROR_MESSAGE);
+            }
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this,
+                "Failed to open file: " + ex.getMessage(),
+                "Error", JOptionPane.ERROR_MESSAGE);
         }
     }
 
@@ -822,6 +1127,22 @@ public class NoteDialog extends JDialog {
                         // Convert image component to markdown
                         ResizableImageComponent imgComp = (ResizableImageComponent) component;
                         result.append(imgComp.getMarkdown());
+                    } else if (component instanceof JButton) {
+                        // Convert file link button to markdown
+                        JButton btn = (JButton) component;
+                        String displayText = btn.getText();
+                        // Remove HTML tags if present (from hover effect)
+                        displayText = displayText.replaceAll("<[^>]*>", "");
+
+                        // Extract filename from button's action listeners
+                        // We need to store this in the button's client property
+                        String fileName = (String) btn.getClientProperty("fileName");
+                        if (fileName != null) {
+                            result.append("[").append(displayText).append("](attachments/").append(fileName).append(")");
+                        } else {
+                            // Fallback - just use the display text
+                            result.append(displayText);
+                        }
                     } else {
                         // Regular text
                         int start = elem.getStartOffset();
