@@ -25,14 +25,14 @@ public class Settings {
     @JsonIgnore
     private String storageLocation;
     private String dateFormat;
-    // Default sort order setting for listing notes/chapters
+    // Content date sort order setting for listing notes/chapters
     public enum SortOrder { Ascending, Descending }
-    private SortOrder defaultSortOrder;
+    private SortOrder contentDateSortOrder;
 
     public Settings() {
         // Default values
         this.dateFormat = "yyyy-MM-dd";
-        this.defaultSortOrder = SortOrder.Descending;
+        this.contentDateSortOrder = SortOrder.Descending;
     }
 
     public String getStorageLocation() {
@@ -51,12 +51,12 @@ public class Settings {
         this.dateFormat = dateFormat;
     }
 
-    public SortOrder getDefaultSortOrder() {
-        return defaultSortOrder == null ? SortOrder.Descending : defaultSortOrder;
+    public SortOrder getContentDateSortOrder() {
+        return contentDateSortOrder == null ? SortOrder.Descending : contentDateSortOrder;
     }
 
-    public void setDefaultSortOrder(SortOrder defaultSortOrder) {
-        this.defaultSortOrder = defaultSortOrder;
+    public void setContentDateSortOrder(SortOrder contentDateSortOrder) {
+        this.contentDateSortOrder = contentDateSortOrder;
     }
 
     @JsonIgnore

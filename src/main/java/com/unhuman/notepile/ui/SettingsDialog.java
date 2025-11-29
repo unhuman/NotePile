@@ -129,13 +129,13 @@ public class SettingsDialog extends JDialog {
         }
 
         row++;
-        // Default Sort Order (label in column 0, control in column 1)
+        // Content Date Sort Order (label in column 0, control in column 1)
         gbc.gridx = 0;
         gbc.gridy = row;
         gbc.weightx = 0;
         gbc.insets = new Insets(5, 5, 5, 12);
         gbc.anchor = GridBagConstraints.EAST;
-        JLabel sortLabel = new JLabel("Default Sort Order:");
+        JLabel sortLabel = new JLabel("Content Date Sort Order:");
         sortLabel.setHorizontalAlignment(SwingConstants.RIGHT);
         settingsPanel.add(sortLabel, gbc);
 
@@ -203,8 +203,8 @@ public class SettingsDialog extends JDialog {
         }
 
         // Map enum to combo selection
-        if (settings.getDefaultSortOrder() != null) {
-            sortOrderComboBox.setSelectedItem(settings.getDefaultSortOrder().name());
+        if (settings.getContentDateSortOrder() != null) {
+            sortOrderComboBox.setSelectedItem(settings.getContentDateSortOrder().name());
         } else {
             sortOrderComboBox.setSelectedItem(Settings.SortOrder.Descending.name());
         }
@@ -272,9 +272,9 @@ public class SettingsDialog extends JDialog {
         settings.setDateFormat((String) dateFormatComboBox.getSelectedItem());
         String so = (String) sortOrderComboBox.getSelectedItem();
         try {
-            settings.setDefaultSortOrder(Settings.SortOrder.valueOf(so));
+            settings.setContentDateSortOrder(Settings.SortOrder.valueOf(so));
         } catch (Exception ex) {
-            settings.setDefaultSortOrder(Settings.SortOrder.Descending);
+            settings.setContentDateSortOrder(Settings.SortOrder.Descending);
         }
 
         confirmed = true;

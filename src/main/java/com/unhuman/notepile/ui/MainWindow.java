@@ -240,9 +240,12 @@ public class MainWindow extends JFrame {
         if (chosen != null && !chosen.trim().isEmpty()) {
             try {
                 Settings loaded = Settings.setStorageLocationAndLoadIfExists(chosen);
-                // If user edited other values in the dialog (dateFormat), prefer those
+                // If user edited other values in the dialog (dateFormat, sortOrder), prefer those
                 if (dialogSettings.getDateFormat() != null && !dialogSettings.getDateFormat().trim().isEmpty()) {
                     loaded.setDateFormat(dialogSettings.getDateFormat());
+                }
+                if (dialogSettings.getContentDateSortOrder() != null) {
+                    loaded.setContentDateSortOrder(dialogSettings.getContentDateSortOrder());
                 }
                 loaded.save();
                 this.settings = loaded;
@@ -263,9 +266,21 @@ public class MainWindow extends JFrame {
             if (dialogSettings.getDateFormat() != null) {
                 this.settings.setDateFormat(dialogSettings.getDateFormat());
             }
+            if (dialogSettings.getContentDateSortOrder() != null) {
+                this.settings.setContentDateSortOrder(dialogSettings.getContentDateSortOrder());
+            }
             try {
                 this.settings.save();
                 updateStatus("Settings saved - Storage: " + settings.getStorageLocation());
+
+                // Refresh the current note view to apply new sort order
+                String currentNotebook = (String) notebooksCombo.getSelectedItem();
+                String currentChapter = chaptersList.getSelectedValue();
+                if (currentNotebook != null && currentChapter != null && noteViewer != null) {
+                    noteViewer.setSettings(this.settings);
+                    noteViewer.loadNotes(this.settings.getStorageLocation(), currentNotebook, currentChapter);
+                }
+
                 return true;
             } catch (IOException e) {
                 JOptionPane.showMessageDialog(this,

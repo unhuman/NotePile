@@ -127,7 +127,7 @@ public class NoteViewerPanel extends JPanel {
             // Sort according to settings
             boolean descending = true;
             if (settings != null) {
-                descending = settings.getDefaultSortOrder() == Settings.SortOrder.Descending;
+                descending = settings.getContentDateSortOrder() == Settings.SortOrder.Descending;
             }
             files.sort(Comparator.comparing(p -> p.getFileName().toString()));
             if (descending) Collections.reverse(files);
@@ -697,16 +697,80 @@ public class NoteViewerPanel extends JPanel {
             }
             Path target = garbageRoot.resolve(noteFile.getFileName());
             // avoid overwrite: if exists, append timestamp
+            String timestampSuffix = "";
             if (Files.exists(target)) {
                 String base = noteFile.getFileName().toString();
                 String name = base;
                 int idx = base.lastIndexOf('.');
                 String ext = "";
                 if (idx > 0) { ext = base.substring(idx); name = base.substring(0, idx); }
-                String ts = "-" + System.currentTimeMillis();
-                target = garbageRoot.resolve(name + ts + ext);
+                timestampSuffix = "-" + System.currentTimeMillis();
+                target = garbageRoot.resolve(name + timestampSuffix + ext);
             }
+
+            // Before moving the note, extract referenced attachments from its content
+            java.util.Set<String> referencedAttachments = new java.util.HashSet<>();
+            try {
+                String noteContent = Files.readString(noteFile);
+                com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                com.fasterxml.jackson.databind.JsonNode root = mapper.readTree(noteContent);
+                String content = root.path("content").asText("");
+
+                // Find all attachment references in markdown: [text](attachments/filename)
+                java.util.regex.Pattern linkPattern = java.util.regex.Pattern.compile("\\[([^\\]]+)\\]\\(attachments/([^)]+)\\)");
+                java.util.regex.Matcher linkMatcher = linkPattern.matcher(content);
+                while (linkMatcher.find()) {
+                    referencedAttachments.add(linkMatcher.group(2));
+                }
+
+                // Find all image references: <img src="attachments/filename"
+                java.util.regex.Pattern imgPattern = java.util.regex.Pattern.compile("<img[^>]+src=\"attachments/([^\"]+)\"");
+                java.util.regex.Matcher imgMatcher = imgPattern.matcher(content);
+                while (imgMatcher.find()) {
+                    referencedAttachments.add(imgMatcher.group(1));
+                }
+            } catch (Exception parseEx) {
+                System.err.println("Warning: Failed to parse note content for attachments: " + parseEx.getMessage());
+                // Continue with deletion even if parsing fails
+            }
+
+            // Move the note file
             Files.move(noteFile, target, StandardCopyOption.REPLACE_EXISTING);
+
+            // Also MOVE referenced attachments (not copy!)
+            Path sourceAttachmentsDir = noteFile.getParent().resolve("attachments");
+            if (Files.exists(sourceAttachmentsDir) && Files.isDirectory(sourceAttachmentsDir) && !referencedAttachments.isEmpty()) {
+                try {
+                    // Create attachments dir in garbage location
+                    Path garbageAttachmentsDir = garbageRoot.resolve("attachments");
+                    if (!Files.exists(garbageAttachmentsDir)) {
+                        Files.createDirectories(garbageAttachmentsDir);
+                    }
+
+                    // MOVE only the attachments that are referenced in this note
+                    for (String fileName : referencedAttachments) {
+                        Path sourceAttachment = sourceAttachmentsDir.resolve(fileName);
+                        if (Files.exists(sourceAttachment) && Files.isRegularFile(sourceAttachment)) {
+                            Path garbageAttachment = garbageAttachmentsDir.resolve(fileName);
+
+                            // If same-named file exists in garbage, add timestamp
+                            if (Files.exists(garbageAttachment) && !timestampSuffix.isEmpty()) {
+                                int dotIdx = fileName.lastIndexOf('.');
+                                String attachName = dotIdx > 0 ? fileName.substring(0, dotIdx) : fileName;
+                                String attachExt = dotIdx > 0 ? fileName.substring(dotIdx) : "";
+                                garbageAttachment = garbageAttachmentsDir.resolve(attachName + timestampSuffix + attachExt);
+                            }
+
+                            // MOVE attachment to garbage (delete from original location)
+                            Files.move(sourceAttachment, garbageAttachment, StandardCopyOption.REPLACE_EXISTING);
+                        }
+                    }
+                } catch (IOException attachEx) {
+                    System.err.println("Warning: Failed to move some attachments to .garbage: " + attachEx.getMessage());
+                    // Don't fail the entire delete operation if attachment move fails
+                }
+            }
+
             // Reload notes after deletion
             loadNotes(currentStorage, currentNotebook, currentChapter);
             JOptionPane.showMessageDialog(this, "Note moved to .garbage.", "Deleted", JOptionPane.INFORMATION_MESSAGE);
