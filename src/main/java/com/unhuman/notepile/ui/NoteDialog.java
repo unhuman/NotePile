@@ -70,7 +70,11 @@ public class NoteDialog extends JDialog {
         header.add(new JLabel("Notebook:"), gbc);
         gbc.gridx = 1; gbc.weightx = 1.0;
         notebooksCombo = new JComboBox<>();
-        if (notebooks != null) notebooks.forEach(n -> notebooksCombo.addItem(n));
+        if (notebooks != null) {
+            notebooks.stream()
+                    .filter(n -> n != null && !n.startsWith("."))
+                    .forEach(n -> notebooksCombo.addItem(n));
+        }
         if (selectedNotebook != null) notebooksCombo.setSelectedItem(selectedNotebook);
         header.add(notebooksCombo, gbc);
 
@@ -125,6 +129,57 @@ public class NoteDialog extends JDialog {
         // Content area
         contentArea = new JTextArea();
         JScrollPane contentScroll = new JScrollPane(contentArea);
+        // Support drag-and-drop attachments: files dropped into the content area are copied into the
+        // current chapter's notes/attachments directory and a markdown link is inserted at the caret.
+        contentArea.setTransferHandler(new TransferHandler() {
+            @Override
+            public boolean canImport(TransferHandler.TransferSupport support) {
+                return support.isDataFlavorSupported(java.awt.datatransfer.DataFlavor.javaFileListFlavor);
+            }
+
+            @Override
+            public boolean importData(TransferHandler.TransferSupport support) {
+                if (!canImport(support)) return false;
+                try {
+                    java.awt.datatransfer.Transferable t = support.getTransferable();
+                    @SuppressWarnings("unchecked")
+                    java.util.List<java.io.File> files = (java.util.List<java.io.File>) t.getTransferData(java.awt.datatransfer.DataFlavor.javaFileListFlavor);
+                    if (files == null || files.isEmpty()) return false;
+                    // Determine target attachments dir for currently selected notebook/chapter in dialog
+                    String nb = (String) notebooksCombo.getSelectedItem();
+                    String ch = (String) chaptersCombo.getSelectedItem();
+                    if (nb == null || ch == null) {
+                        JOptionPane.showMessageDialog(NoteDialog.this, "Please select a notebook and chapter before dropping attachments.", "No Target", JOptionPane.WARNING_MESSAGE);
+                        return false;
+                    }
+                    Path attachmentsDir = Paths.get(storageRoot, nb, ch, "notes", "attachments");
+                    if (!Files.exists(attachmentsDir)) Files.createDirectories(attachmentsDir);
+
+                    StringBuilder insertBuilder = new StringBuilder();
+                    for (java.io.File f : files) {
+                        java.nio.file.Path dest = copyAttachment(f.toPath(), attachmentsDir);
+                        if (dest != null) {
+                            String fname = dest.getFileName().toString();
+                            // If image, insert markdown image syntax, otherwise a link
+                            String lower = fname.toLowerCase();
+                            if (lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".gif") || lower.endsWith(".svg")) {
+                                insertBuilder.append("![").append(fname).append("](attachments/").append(fname).append(")\n");
+                            } else {
+                                insertBuilder.append("[").append(fname).append("](attachments/").append(fname).append(")\n");
+                            }
+                        }
+                    }
+                    if (insertBuilder.length() > 0) {
+                        final String toInsert = insertBuilder.toString();
+                        SwingUtilities.invokeLater(() -> contentArea.insert(toInsert, contentArea.getCaretPosition()));
+                    }
+                    return true;
+                } catch (Exception ex) {
+                    ex.printStackTrace(System.err);
+                    return false;
+                }
+            }
+        });
         main.add(contentScroll, BorderLayout.CENTER);
 
         // Buttons
@@ -388,9 +443,18 @@ public class NoteDialog extends JDialog {
     }
 
     /**
+     * Append text to the content area at current caret position. Public so other UI components
+     * (like the viewer's drag-and-drop handler) can insert attachment links.
+     */
+    public void insertIntoContent(String text) {
+        if (text == null || text.isEmpty()) return;
+        SwingUtilities.invokeLater(() -> contentArea.insert(text, contentArea.getCaretPosition()));
+    }
+
+    /**
      * Populate the dialog with an existing note file for editing. The file must be a JSON note
      * previously written by the application. This will set editingPath so save() will update
-     * the existing file (or move/rename it if notebook/chapter/date changed).
+     * the existing file (or move/renamed it if notebook/chapter/date changed).
      */
     public void populateForEdit(java.nio.file.Path notePath) throws IOException {
         if (notePath == null || !java.nio.file.Files.exists(notePath)) {
@@ -421,5 +485,34 @@ public class NoteDialog extends JDialog {
         }
         this.editingPath = notePath;
         setTitle("Edit Note");
+    }
+
+    // Copy an attachment into the attachmentsDir, avoiding name collisions by appending a counter.
+    private java.nio.file.Path copyAttachment(java.nio.file.Path src, java.nio.file.Path attachmentsDir) {
+        try {
+            String fileName = src.getFileName().toString();
+            java.nio.file.Path dest = attachmentsDir.resolve(fileName);
+            if (java.nio.file.Files.exists(dest)) {
+                String base = fileName;
+                String ext = "";
+                int idx = fileName.lastIndexOf('.');
+                if (idx > 0) {
+                    base = fileName.substring(0, idx);
+                    ext = fileName.substring(idx);
+                }
+                int counter = 1;
+                while (java.nio.file.Files.exists(dest)) {
+                    String candidate = base + "-" + counter + ext;
+                    dest = attachmentsDir.resolve(candidate);
+                    counter++;
+                    if (counter > 10000) break;
+                }
+            }
+            java.nio.file.Files.copy(src, dest);
+            return dest;
+        } catch (Exception ex) {
+            ex.printStackTrace(System.err);
+            return null;
+        }
     }
 }

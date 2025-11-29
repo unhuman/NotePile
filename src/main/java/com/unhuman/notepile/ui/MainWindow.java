@@ -53,9 +53,25 @@ public class MainWindow extends JFrame {
         // Top: notebook selector + new button
         JPanel topPanel = new JPanel(new BorderLayout(4, 4));
         notebooksCombo = new JComboBox<>();
+        // Force non-editable combo to avoid showing typed or stale values like ".garbage"
+        notebooksCombo.setEditable(false);
         notebooksCombo.addActionListener(e -> {
             String selected = (String) notebooksCombo.getSelectedItem();
             refreshChapters(selected);
+        });
+        // Defensive listener: before showing the popup, remove any hidden/dot-prefixed items (e.g. .garbage)
+        notebooksCombo.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
+            @Override
+            public void popupMenuWillBecomeVisible(javax.swing.event.PopupMenuEvent e) {
+                for (int i = notebooksCombo.getItemCount() - 1; i >= 0; i--) {
+                    String it = (String) notebooksCombo.getItemAt(i);
+                    if (it == null || it.trim().startsWith(".")) {
+                        notebooksCombo.removeItemAt(i);
+                    }
+                }
+            }
+            @Override public void popupMenuWillBecomeInvisible(javax.swing.event.PopupMenuEvent e) {}
+            @Override public void popupMenuCanceled(javax.swing.event.PopupMenuEvent e) {}
         });
         topPanel.add(notebooksCombo, BorderLayout.CENTER);
 
@@ -153,6 +169,8 @@ public class MainWindow extends JFrame {
         if (settings != null && settings.isValid()) {
             updateStatus("Storage location: " + settings.getStorageLocation());
             refreshNotebooks();
+            // Ensure .garbage never appears
+            if (notebooksCombo != null) notebooksCombo.removeItem(".garbage");
             return;
         }
 
@@ -198,6 +216,7 @@ public class MainWindow extends JFrame {
             this.settings = loaded;
             updateStatus("Storage location: " + settings.getStorageLocation());
             refreshNotebooks();
+            if (notebooksCombo != null) notebooksCombo.removeItem(".garbage");
         } catch (IOException e) {
             JOptionPane.showMessageDialog(this,
                     "Failed to save/load settings: " + e.getMessage(),
@@ -267,16 +286,35 @@ public class MainWindow extends JFrame {
         if (!Files.exists(storage) || !Files.isDirectory(storage)) return;
 
         try {
-            Files.list(storage)
+            java.util.List<String> nbNames = Files.list(storage)
                     .filter(Files::isDirectory)
+                    // exclude hidden dot-directories (e.g. .garbage, .viewer)
+                    .filter(p -> {
+                        String nm = normalizeName(p.getFileName().toString());
+                        return nm != null && !nm.startsWith(".");
+                    })
                     .sorted(Comparator.comparing(Path::getFileName))
-                    .map(p -> p.getFileName().toString())
-                    .collect(Collectors.toList())
-                    .forEach(name -> notebooksCombo.addItem(name));
-            // Auto-select first notebook if present
-            if (notebooksCombo.getItemCount() > 0) {
-                notebooksCombo.setSelectedIndex(0);
+                    .map(p -> normalizeName(p.getFileName().toString()))
+                    .collect(Collectors.toList());
+
+            // Build a fresh model and apply it atomically to the combo box so no stray items remain
+            DefaultComboBoxModel<String> model = new DefaultComboBoxModel<>();
+            for (String name : nbNames) model.addElement(name);
+            // Defensive: remove any literal ".garbage" if present
+            model.removeElement(".garbage");
+            notebooksCombo.setModel(model);
+
+            // Auto-select first non-dot notebook if present; if none, clear selection
+            boolean selected = false;
+            for (int i = 0; i < notebooksCombo.getItemCount(); i++) {
+                String it = (String) notebooksCombo.getItemAt(i);
+                if (it != null && !it.trim().startsWith(".")) {
+                    notebooksCombo.setSelectedIndex(i);
+                    selected = true;
+                    break;
+                }
             }
+            if (!selected) notebooksCombo.setSelectedItem(null);
         } catch (IOException e) {
             updateStatus("Failed to list notebooks: " + e.getMessage());
         }
@@ -295,6 +333,8 @@ public class MainWindow extends JFrame {
             // Chapters are directories under the notebook folder
             java.util.List<String> names = Files.list(nbPath)
                     .filter(Files::isDirectory)
+                    // exclude hidden dot-directories
+                    .filter(p -> !p.getFileName().toString().startsWith("."))
                     .sorted(Comparator.comparing(Path::getFileName))
                     .map(p -> p.getFileName().toString())
                     .collect(Collectors.toList());
@@ -381,7 +421,12 @@ public class MainWindow extends JFrame {
     private void onAddNote() {
         // Build list of notebooks and chapters for the dialog
         java.util.List<String> notebooks = new java.util.ArrayList<>();
-        for (int i = 0; i < notebooksCombo.getItemCount(); i++) notebooks.add((String) notebooksCombo.getItemAt(i));
+        for (int i = 0; i < notebooksCombo.getItemCount(); i++) {
+            String it = (String) notebooksCombo.getItemAt(i);
+            if (it == null) continue;
+            if (it.trim().startsWith(".")) continue; // skip hidden/internal
+            notebooks.add(it);
+        }
         String selNb = (String) notebooksCombo.getSelectedItem();
         String selCh = chaptersList.getSelectedValue();
 
@@ -424,5 +469,14 @@ public class MainWindow extends JFrame {
             dispose();
             System.exit(0);
         }
+    }
+
+    // Normalize a filesystem name: trim and remove control characters so hidden names are recognized reliably
+    private static String normalizeName(String raw) {
+        if (raw == null) return null;
+        String trimmed = raw.trim();
+        // remove non-printable characters
+        trimmed = trimmed.replaceAll("\\p{C}", "");
+        return trimmed;
     }
 }
