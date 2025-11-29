@@ -30,6 +30,7 @@ public class NoteDialog extends JDialog {
     private DatePicker datePicker;
     private JTextPane contentArea;
     private javax.swing.text.StyledDocument contentDoc;
+    private javax.swing.undo.UndoManager undoManager;
 
     private final String storageRoot;
     private final String dateFormatPattern;
@@ -136,10 +137,18 @@ public class NoteDialog extends JDialog {
         contentArea = new JTextPane();
         contentDoc = contentArea.getStyledDocument();
         contentArea.setContentType("text/plain"); // Start with plain text mode
+
+        // Initialize UndoManager for undo/redo support
+        undoManager = new javax.swing.undo.UndoManager();
+        contentDoc.addUndoableEditListener(undoManager);
+
         JScrollPane contentScroll = new JScrollPane(contentArea);
 
         // Enable standard cut/copy/paste keyboard shortcuts (Ctrl+X, Ctrl+C, Ctrl+V)
         setupClipboardSupport(contentArea);
+
+        // Enable undo/redo keyboard shortcuts (Ctrl+Z, Ctrl+Y)
+        setupUndoRedoSupport(contentArea);
 
         // Support drag-and-drop attachments: files dropped into the content area are copied into the
         // current chapter's notes/attachments directory and a markdown link is inserted at the caret.
@@ -548,6 +557,12 @@ public class NoteDialog extends JDialog {
                 try { datePicker.setDate(java.time.LocalDate.parse(d)); } catch (Exception ignore) {}
             }
         }
+
+        // Discard all undo history so that undo only goes back to this loaded state, not to empty
+        if (undoManager != null) {
+            undoManager.discardAllEdits();
+        }
+
         this.editingPath = notePath;
         setTitle("Edit Note");
     }
@@ -630,6 +645,35 @@ public class NoteDialog extends JDialog {
         textPane.getInputMap().put(KeyStroke.getKeyStroke("control X"), "cut-to-clipboard");
         textPane.getInputMap().put(KeyStroke.getKeyStroke("control C"), "copy-to-clipboard");
         textPane.getInputMap().put(KeyStroke.getKeyStroke("control V"), "paste-from-clipboard");
+    }
+
+    /**
+     * Setup undo/redo keyboard shortcuts (Ctrl+Z and Ctrl+Y).
+     */
+    private void setupUndoRedoSupport(JTextPane textPane) {
+        // Ctrl+Z for Undo
+        textPane.getInputMap().put(KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_Z,
+            java.awt.event.InputEvent.CTRL_DOWN_MASK), "undo");
+        textPane.getActionMap().put("undo", new AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                if (undoManager.canUndo()) {
+                    undoManager.undo();
+                }
+            }
+        });
+
+        // Ctrl+Y for Redo
+        textPane.getInputMap().put(KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_Y,
+            java.awt.event.InputEvent.CTRL_DOWN_MASK), "redo");
+        textPane.getActionMap().put("redo", new AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                if (undoManager.canRedo()) {
+                    undoManager.redo();
+                }
+            }
+        });
     }
 
     /**
