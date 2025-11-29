@@ -42,6 +42,9 @@ public class NoteDialog extends JDialog {
         public String date; // new field for date
     }
 
+    // When editing an existing note, this is the path to the note being edited.
+    private java.nio.file.Path editingPath = null;
+
     // Constructor now receives storageRoot and list of notebooks; chapters will be discovered dynamically
     public NoteDialog(Frame parent, String storageRoot, List<String> notebooks, String selectedNotebook, String selectedChapter, String dateFormatPattern) {
         super(parent, "Add Note", true);
@@ -256,29 +259,72 @@ public class NoteDialog extends JDialog {
             noteObj.put("content", d.content);
             noteObj.put("createdAt", System.currentTimeMillis());
 
-            // Attempt to atomically create a new file with a counter suffix to avoid race conditions.
+            // ----- Editing vs Creating logic -----
             java.nio.file.Path notePath = null;
-            int attempts = 0;
-            while (true) {
-                String filename = base + "-" + next + ".json";
-                notePath = notesDir.resolve(filename);
-                try {
-                    // This will fail if the file already exists, ensuring atomicity
-                    java.nio.file.Files.createFile(notePath);
-                    break; // success
-                } catch (java.nio.file.FileAlreadyExistsException fae) {
-                    next++;
-                    attempts++;
-                    if (attempts > 10000) {
-                        throw new IOException("Too many filename collisions for base: " + base);
+            if (this.editingPath == null) {
+                // Create new note file as before
+                int attempts = 0;
+                while (true) {
+                    String filename = base + "-" + next + ".json";
+                    notePath = notesDir.resolve(filename);
+                    try {
+                        java.nio.file.Files.createFile(notePath);
+                        break; // success
+                    } catch (java.nio.file.FileAlreadyExistsException fae) {
+                        next++;
+                        attempts++;
+                        if (attempts > 10000) {
+                            throw new IOException("Too many filename collisions for base: " + base);
+                        }
+                        // try next
                     }
-                    // try next
+                }
+            } else {
+                // Editing existing note: decide whether we can overwrite same file or need to create a new one
+                java.nio.file.Path original = this.editingPath;
+                // Try to preserve createdAt from original if present
+                try {
+                    @SuppressWarnings("unchecked")
+                    java.util.Map<String,Object> orig = mapper.readValue(original.toFile(), java.util.Map.class);
+                    if (orig.containsKey("createdAt")) {
+                        noteObj.put("createdAt", orig.get("createdAt"));
+                    }
+                } catch (Exception ignore) { }
+
+                // If original parent equals target notesDir and filename matches base-<n>.json pattern starting with base, overwrite original.
+                if (original.getParent() != null && original.getParent().equals(notesDir)) {
+                    String origName = original.getFileName().toString();
+                    if (origName.startsWith(base + "-") && origName.endsWith(".json")) {
+                        notePath = original; // overwrite
+                    }
+                }
+
+                if (notePath == null) {
+                    // create a new file in target dir with next counter
+                    int attempts = 0;
+                    while (true) {
+                        String filename = base + "-" + next + ".json";
+                        notePath = notesDir.resolve(filename);
+                        try {
+                            java.nio.file.Files.createFile(notePath);
+                            break;
+                        } catch (java.nio.file.FileAlreadyExistsException fae) {
+                            next++;
+                            attempts++;
+                            if (attempts > 10000) throw new IOException("Too many filename collisions for base: " + base);
+                        }
+                    }
                 }
             }
 
-            // Write JSON into the newly created file (overwrite the empty file)
-            try (java.io.OutputStream os = java.nio.file.Files.newOutputStream(notePath, java.nio.file.StandardOpenOption.WRITE)) {
+            // Write JSON into the selected file (overwrite if existing)
+            try (java.io.OutputStream os = java.nio.file.Files.newOutputStream(notePath, java.nio.file.StandardOpenOption.WRITE, java.nio.file.StandardOpenOption.TRUNCATE_EXISTING)) {
                 mapper.writeValue(os, noteObj);
+            }
+
+            // If we were editing and created a new file (moved/renamed), delete the old one
+            if (this.editingPath != null && !this.editingPath.equals(notePath)) {
+                try { java.nio.file.Files.deleteIfExists(this.editingPath); } catch (Exception ignored) {}
             }
 
             // success: set lastSavedPath, mark confirmed, and close
@@ -339,5 +385,41 @@ public class NoteDialog extends JDialog {
 
     public java.nio.file.Path getLastSavedPath() {
         return lastSavedPath;
+    }
+
+    /**
+     * Populate the dialog with an existing note file for editing. The file must be a JSON note
+     * previously written by the application. This will set editingPath so save() will update
+     * the existing file (or move/rename it if notebook/chapter/date changed).
+     */
+    public void populateForEdit(java.nio.file.Path notePath) throws IOException {
+        if (notePath == null || !java.nio.file.Files.exists(notePath)) {
+            throw new IOException("Note file does not exist: " + notePath);
+        }
+        // Read JSON into a map
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        @SuppressWarnings("unchecked")
+        java.util.Map<String,Object> m = mapper.readValue(notePath.toFile(), java.util.Map.class);
+        // Fill fields where present
+        String nb = (String) m.get("notebook");
+        String ch = (String) m.get("chapter");
+        if (nb != null) notebooksCombo.setSelectedItem(nb);
+        refreshChaptersFromStorage(nb, ch);
+        if (ch != null) chaptersCombo.setSelectedItem(ch);
+        titleField.setText((String) m.getOrDefault("title", ""));
+        peopleField.setText((String) m.getOrDefault("people", ""));
+        labelsField.setText((String) m.getOrDefault("labels", ""));
+        contentArea.setText((String) m.getOrDefault("content", ""));
+        String d = (String) m.get("date");
+        if (d != null) {
+            try {
+                java.time.format.DateTimeFormatter fmt = java.time.format.DateTimeFormatter.ofPattern(this.dateFormatPattern);
+                datePicker.setDate(java.time.LocalDate.parse(d, fmt));
+            } catch (Exception ex) {
+                try { datePicker.setDate(java.time.LocalDate.parse(d)); } catch (Exception ignore) {}
+            }
+        }
+        this.editingPath = notePath;
+        setTitle("Edit Note");
     }
 }

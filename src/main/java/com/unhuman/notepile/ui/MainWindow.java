@@ -26,6 +26,7 @@ public class MainWindow extends JFrame {
     private JComboBox<String> notebooksCombo;
     private DefaultListModel<String> chaptersModel;
     private JList<String> chaptersList;
+    private NoteViewerPanel noteViewer;
 
     public MainWindow() {
         super("NotePile - Hierarchical Note Taking");
@@ -72,8 +73,13 @@ public class MainWindow extends JFrame {
         chaptersList.addListSelectionListener((ListSelectionEvent e) -> {
             if (!e.getValueIsAdjusting()) {
                 String chapter = chaptersList.getSelectedValue();
+                String notebook = (String) notebooksCombo.getSelectedItem();
                 if (chapter != null) {
                     updateStatus("Selected chapter: " + chapter);
+                    if (noteViewer != null) {
+                        noteViewer.setSettings(settings);
+                        noteViewer.loadNotes(settings == null ? null : settings.getStorageLocation(), notebook, chapter);
+                    }
                 }
             }
         });
@@ -85,7 +91,7 @@ public class MainWindow extends JFrame {
         newChapterBtn.addActionListener(e -> onNewChapter());
         leftPanel.add(newChapterBtn, BorderLayout.SOUTH);
 
-        // Right pane: note-taking UI with Add Note button
+        // Right pane: note viewer and Add Note button
         JPanel rightPanel = new JPanel(new BorderLayout());
         rightPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
         JPanel topRight = new JPanel(new FlowLayout(FlowLayout.LEFT));
@@ -94,10 +100,9 @@ public class MainWindow extends JFrame {
         topRight.add(addNoteBtn);
         rightPanel.add(topRight, BorderLayout.NORTH);
 
-        JLabel placeholderLabel = new JLabel("Note-taking interface will be implemented here", SwingConstants.CENTER);
-        placeholderLabel.setFont(placeholderLabel.getFont().deriveFont(18f));
-        placeholderLabel.setForeground(Color.GRAY);
-        rightPanel.add(placeholderLabel, BorderLayout.CENTER);
+        // Note viewer panel
+        noteViewer = new NoteViewerPanel();
+        rightPanel.add(noteViewer, BorderLayout.CENTER);
 
         // Split pane
         JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftPanel, rightPanel);
@@ -278,20 +283,36 @@ public class MainWindow extends JFrame {
     }
 
     private void refreshChapters(String notebook) {
-        chaptersModel.clear();
         if (notebook == null || settings == null || settings.getStorageLocation() == null) return;
 
         Path nbPath = Paths.get(settings.getStorageLocation(), notebook);
         if (!Files.exists(nbPath) || !Files.isDirectory(nbPath)) return;
 
+        // Preserve current selection if possible
+        String previous = chaptersList.getSelectedValue();
+        chaptersModel.clear();
         try {
-            // Chapters are now directories under the notebook folder
-            Files.list(nbPath)
+            // Chapters are directories under the notebook folder
+            java.util.List<String> names = Files.list(nbPath)
                     .filter(Files::isDirectory)
                     .sorted(Comparator.comparing(Path::getFileName))
                     .map(p -> p.getFileName().toString())
-                    .collect(Collectors.toList())
-                    .forEach(chaptersModel::addElement);
+                    .collect(Collectors.toList());
+            for (String n : names) chaptersModel.addElement(n);
+
+            // Restore previous selection if present; otherwise select first
+            if (previous != null && names.contains(previous)) {
+                chaptersList.setSelectedValue(previous, true);
+            } else if (chaptersModel.getSize() > 0) {
+                chaptersList.setSelectedIndex(0);
+            }
+
+            // Load notes for the selected chapter
+            String chapter = chaptersList.getSelectedValue();
+            if (chapter != null && noteViewer != null) {
+                noteViewer.setSettings(settings);
+                noteViewer.loadNotes(settings.getStorageLocation(), notebook, chapter);
+            }
         } catch (IOException e) {
             updateStatus("Failed to list chapters: " + e.getMessage());
         }
