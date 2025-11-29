@@ -108,12 +108,14 @@ public class MainWindow extends JFrame {
         leftPanel.add(newChapterBtn, BorderLayout.SOUTH);
 
         // Right pane: note viewer and Add Note button
-        JPanel rightPanel = new JPanel(new BorderLayout());
-        rightPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        JPanel topRight = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        JPanel rightPanel = new JPanel(new BorderLayout(6, 6));
+        rightPanel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+
+        // Top: Add Note button - align with notebook dropdown on left
+        JPanel topRight = new JPanel(new BorderLayout(4, 4));
         JButton addNoteBtn = new JButton("Add Note");
         addNoteBtn.addActionListener(e -> onAddNote());
-        topRight.add(addNoteBtn);
+        topRight.add(addNoteBtn, BorderLayout.WEST);
         rightPanel.add(topRight, BorderLayout.NORTH);
 
         // Note viewer panel
