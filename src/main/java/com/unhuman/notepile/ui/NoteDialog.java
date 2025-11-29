@@ -198,12 +198,12 @@ public class NoteDialog extends JDialog {
                                 attachedImages.add(fname);
 
                                 String lower = fname.toLowerCase();
-                                // If image, insert inline with markdown, otherwise just markdown link
+                                // If image, insert inline with markdown, otherwise insert as clickable link button
                                 if (lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".gif")) {
                                     insertImageInline(dest, fname);
                                 } else {
-                                    String markdown = "[" + fname + "](attachments/" + fname + ")\n";
-                                    contentArea.replaceSelection(markdown);
+                                    // Insert as clickable link button immediately
+                                    insertFileLinkButton(fname, dest);
                                 }
                             }
                         }
@@ -776,14 +776,13 @@ public class NoteDialog extends JDialog {
                         attachedImages.add(fileName);
 
                         String lower = fileName.toLowerCase();
-                        // If image, insert inline with markdown, otherwise just markdown link
+                        // If image, insert inline with markdown, otherwise insert as clickable link button
                         if (lower.endsWith(".png") || lower.endsWith(".jpg") ||
                             lower.endsWith(".jpeg") || lower.endsWith(".gif")) {
                             insertImageInline(dest, fileName);
                         } else {
-                            // Insert as a clickable link
-                            String markdown = "[" + fileName + "](attachments/" + fileName + ")\n";
-                            contentArea.replaceSelection(markdown);
+                            // Insert as clickable link button immediately
+                            insertFileLinkButton(fileName, dest);
                         }
                     }
                 }
@@ -1069,6 +1068,54 @@ public class NoteDialog extends JDialog {
             contentArea.insertComponent(linkButton);
         } catch (Exception ex) {
             contentArea.replaceSelection("[" + lr.displayText + "]");
+        }
+    }
+
+    /**
+     * Insert a clickable link button for a file (used when dropping/attaching files).
+     * This creates the same type of button that appears when loading notes.
+     */
+    private void insertFileLinkButton(String displayText, Path filePath) {
+        try {
+            // Create a clickable button/link
+            JButton linkButton = new JButton(displayText);
+            linkButton.setBorderPainted(false);
+            linkButton.setContentAreaFilled(false);
+            linkButton.setForeground(Color.BLUE);
+            linkButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            linkButton.setFocusable(false);
+
+            // Store original font for hover effect
+            Font originalFont = linkButton.getFont();
+            Font underlinedFont = originalFont.deriveFont(originalFont.getAttributes());
+            java.util.Map<java.awt.font.TextAttribute, Object> attributes = new java.util.HashMap<>(underlinedFont.getAttributes());
+            attributes.put(java.awt.font.TextAttribute.UNDERLINE, java.awt.font.TextAttribute.UNDERLINE_ON);
+            Font underlineFont = originalFont.deriveFont(attributes);
+
+            // Store fileName for extraction when saving
+            String fileName = filePath.getFileName().toString();
+            linkButton.putClientProperty("fileName", fileName);
+
+            // Add underline on hover using font attributes (no size change)
+            linkButton.addMouseListener(new MouseAdapter() {
+                @Override
+                public void mouseEntered(MouseEvent e) {
+                    linkButton.setFont(underlineFont);
+                }
+
+                @Override
+                public void mouseExited(MouseEvent e) {
+                    linkButton.setFont(originalFont);
+                }
+            });
+
+            // Open file when clicked
+            linkButton.addActionListener(e -> openFileExternally(filePath));
+
+            contentArea.insertComponent(linkButton);
+        } catch (Exception ex) {
+            // Fallback to plain text if button creation fails
+            contentArea.replaceSelection("[" + displayText + "]");
         }
     }
 
