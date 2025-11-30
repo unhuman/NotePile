@@ -141,7 +141,10 @@ public class MainWindow extends JFrame {
         // --- Menu Bar (File / Help) ---
         JMenuBar menuBar = new JMenuBar();
         JMenu fileMenu = new JMenu("File");
+        fileMenu.setMnemonic(java.awt.event.KeyEvent.VK_F);
         JMenuItem settingsItem = new JMenuItem("Settings...");
+        settingsItem.setMnemonic(java.awt.event.KeyEvent.VK_S);
+        settingsItem.setAccelerator(javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_COMMA, java.awt.Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()));
         settingsItem.addActionListener(e -> {
             // Open settings dialog (do not require storage or show storage field)
             showSettings(this.settings == null ? new com.unhuman.notepile.model.Settings() : this.settings, false, false);
@@ -149,19 +152,23 @@ public class MainWindow extends JFrame {
         fileMenu.add(settingsItem);
 
         JMenuItem exitItem = new JMenuItem("Exit");
+        exitItem.setMnemonic(java.awt.event.KeyEvent.VK_X);
+        exitItem.setAccelerator(javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_Q, java.awt.Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()));
         exitItem.addActionListener(e -> onExit());
         fileMenu.add(exitItem);
         menuBar.add(fileMenu);
 
         JMenu helpMenu = new JMenu("Help");
+        helpMenu.setMnemonic(java.awt.event.KeyEvent.VK_H);
         JMenuItem aboutItem = new JMenuItem("About");
+        aboutItem.setMnemonic(java.awt.event.KeyEvent.VK_A);
         aboutItem.addActionListener(e -> showAbout());
         helpMenu.add(aboutItem);
         menuBar.add(helpMenu);
 
-        setJMenuBar(menuBar);
-
         setContentPane(contentPanel);
+
+        setJMenuBar(menuBar);
     }
 
     public void initialize() {
